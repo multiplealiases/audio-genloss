@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+
+set -o nounset
+set -o errexit
+
+function banner() {
+    echo Induce generation loss on audio
+}
+
+function usage() {
+    echo Usage: audio-genloss \[options\] filename
+}
+
+function file_notexist(){
+    printf ''\''%s'\'': file does not exist\n' "$1"
+    exit 3
+}
+
+function file_none(){
+    echo No file was specified.
+    help_text
+    exit 4
+}
+
+
+function help_text(){
+    cat << EOF
+$(banner)
+$(usage)
+
+Defaults shown in [].
+Options:
+-b, --bitrates       space-separated string of bitrates ['48k 96k 128k']
+-c, --codecs         space-separated string of codecs ['libvorbis libmp3lame']
+-o, --output-prefix  output prefix
+-e, --end            end at this iteration [100]
+-h, --help           this help
+EOF
+}
+
+ARGS="$(getopt --options b:,c:,h,o:,e: --long bitrates:,codecs:,help,output-prefix:,end: -- "$@")"
+eval set -- "$ARGS"
+while true; do
+    case "$1" in
+    -o | --output-prefix)
+        output_prefix="$2"
+        shift 2
+        ;;
+    -h | --help)
+        help_text
+        exit 127
+        ;;
+    -c | --codecs)
+        codecs="$2"
+        shift 2
+        ;;
+    -b | --bitrates)
+        bitrates="$2"
+        shift 2
+        ;;
+    -e | --end)
+        end="$2"
+        shift 2
+        ;;
+    --)
+        set +o nounset
+        if [[ -z "$2" ]]
+        then
+            file_none
+        elif [[ ! -e "$2" ]]
+        then
+            file_notexist "$2"
+        fi
+        set -o nounset
+            filepath="$2"
+            break
+            ;;
+        *)
+            printf 'How did you get here? The last args I saw were \n%s\n' "$@"
+            exit 1
+            break
+            ;;
+
+    esac
+done
+end="${end:-100}"
+bitrates="${bitrates:-48k 96k 128k}"
+codecs="${codecs:-libvorbis libmp3lame}"
+
+filename="$(basename "$filepath")"
+base_filename="${filename%.*}"
+output_prefix="${output_prefix:-$base_filename}"
+rm -r "$output_prefix" || true
+mkdir "$output_prefix"
+
+ffmpeg -hide_banner -loglevel error -i "$filepath" -c:a copy -vn "$output_prefix"/0.mkv -y
+
+for i in $(seq 0 "$end")
+do
+    codec="$(shuf --echo -n1 $codecs)"
+    bitrate="$(shuf --echo -n1 $bitrates)"
+    current="$output_prefix"/"$i"
+    next="$output_prefix"/"$((i + 1))"
+
+    printf 'iteration %s: %s at %s\n' "$i" "$codec" "$bitrate" | tee -a "$output_prefix"/list
+    ffmpeg -hide_banner -loglevel error -i "$current".mkv -c:a "$codec" -b:a "$bitrate" "$next".mkv -y
+done
